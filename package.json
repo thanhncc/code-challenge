@@ -1,0 +1,20 @@
+{
+  "name": "99tech-problems",
+  "version": "1.0.0",
+  "npm": "10.9.0",
+  "scripts": {
+    "dev-4": "ts-node ./src/problem4/index.ts",
+    "test-4": "jest --config ./src/problem4/jest.config.js"
+  },
+  "dependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.5.0",
+    "jest": "^30.3.0",
+    "jest-util": "^30.3.0",
+    "ts-jest": "^29.4.6"
+  }
+}
