@@ -1,6 +1,50 @@
 
 # Problem 6 - Scoreboard System Specification
 
+### Software Requirements
+
+1. We have a website with a score board, which shows the top 10 user’s scores.
+2. We want live update of the score board.
+3. User can do an action (which we do not need to care what the action is), completing this action will increase the user’s score.
+4. Upon completion the action will dispatch an API call to the application server to update the score.
+5. We want to prevent malicious users from increasing scores without authorization.
+
+### Idea
+
+With the current implementation below, the CCU numbers will mostly base on the scale for the websocket service.
+
+We will try to distribute the event through a pub/sub model, so its can reduce the load needed to websocket service.
+
+Roughly this can handle 10,000 concurrent users per service instance (without scaling), assuming typical server specs:
+
+- 2–4 vCPUs
+- 4–8 GB RAM
+- Optimized Node.js WebSocket server (e.g., ws or socket.io)
+- Proper OS/network tuning (file descriptors, keepalive, etc.)
+
+Actual capacity may vary based on message frequency, code efficiency, and network conditions.
+
+### Techstack
+
+**Backend:**
+- Node.js (Express or Fastify for API service) for fast iops operation
+- Redis (real-time data store, Pub/Sub)
+- PostgreSQL (durable storage)
+- WebSocket (ws or socket.io for real-time updates)
+- AWS SQS/SNS/EventBridge (for event-driven communication)
+- Docker (containerization)
+
+**Frontend:**
+- React.js (leaderboard UI)
+- WebSocket client (native or socket.io-client)
+- Axios or Fetch API (for HTTP requests)
+
+**Infrastructure/DevOps:**
+- AWS (EC2, Fargate, Elasticache for Redis, RDS for PostgreSQL, SQS/SNS/EventBridge)
+- Nginx (reverse proxy, load balancing)
+- Terraform or AWS CDK (infrastructure as code)
+- GitHub Actions (CI/CD)
+
 ## A. Functional Requirements
 - Display the top 10 users’ scores
 - Support real-time updates for all connected users
@@ -42,8 +86,8 @@
  - Displays the top 10 leaderboard
  - Connects to backend using WebSocket (preferred) or polling
  - Sends score increment requests
- - Applies client-side rate limiting (1 request per 10 seconds)
- - Updates UI in real time when receiving new data
+ - Applies client-side rate limiting (1 request per 10 seconds per user)
+ - Updates UI in real time when receiving new data if changed
 
 ### D.2 Backend API (Stateless)
  - Receive score update requests
@@ -52,6 +96,7 @@
  - Update score in Redis using atomic operations
  - Publish events for asynchronous persistence
  - Broadcast leaderboard updates via a pub/sub mechanism, then broadcast with WebSocket
+ - Implemented with microservice: api service, postgres worker service and websocket service
 
 **Key Design Choices:**
  - No locking is required; Redis operations are atomic
@@ -80,22 +125,24 @@
 #### Pros
  - Redis is always up-to-date due to write-first design
  - Cache misses only occur during cold start or failure recovery
+ - Data is backup into Postgres in case of restart or Redis crashed
 
 #### Cons
  - Redis can only be scale vertical, else we will need a strategy to sync between redis instance if scale
- - PostgreSQL is updated asynchronously, need a strategy to prevent data loss
+ - PostgreSQL is updated asynchronously, can cause data loss
 
 ## F. Security
  - Authenticate all API requests
  - Authorize score updates for valid users only
  - Rate limiting is enforced on both client and server
- - Input validation is applied to all incoming requests
+ - Input validation is applied to all incoming requests (normally support by library)
 
 ## G. Infrastructure
 
 ### G.1 API Layer
- - Stateless services behind a load balancer
- - Scales horizontally based on CPU and request rate
+ - Stateless services behind a load balancer (for api and websocket server mainly)
+ - Scales horizontally, normally based on CPU and request rate, number of message base for the websocket
+ - If scaling is not productive for the realtime category, can use serverless with AWS Fargate
 
 ### G.2 Redis
  - Managed service (cluster mode recommended)
@@ -103,11 +150,11 @@
 
 ### G.3 PostgreSQL
  - Managed database service
- - Scales vertically and with read replicas
+ - Scales vertically and with read replicas (if needed)
  - Tuned based on IOPS and CPU usage
 
 ### G.4 CDN (Optional)
- - Used for serving static frontend assets
+ - Used for serving static frontend assets, serve globally users
  - Can cache leaderboard responses with short TTL if slight delay is acceptable
 
 ---
@@ -115,7 +162,7 @@
 ## H. Scaling Strategy (AWS preferred)
  - API servers scale horizontally with traffic
  - Redis scales via sharding when memory or throughput limits are reached
- - PostgreSQL scales via increased IOPS and read replicas
+ - PostgreSQL scales via increased IOPS throughput and read replicas
  - WebSocket layer scales using pub/sub distribution
  - Use SNS Fan-out to public the topic after redis update
     For update to Postgres, can use lambda as worker
@@ -129,7 +176,7 @@
  - Rebuild leaderboard from PostgreSQL snapshot or event logs
 
 ### I.2 Queue Failure
- - Use durable messaging with retry support
+ - Use durable messaging with retry support (dead letter queue)
 
 ### I.3 Database Failure
  - Retry writes through worker
